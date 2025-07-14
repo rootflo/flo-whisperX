@@ -299,38 +299,35 @@ class FasterWhisperPipeline(Pipeline):
                 filtered_probs.append([token, prob])
         return filtered_probs[:3]
     
+    def _process_language_segment(self, audio, start, end):
+        model_n_mels = self.model.feat_kwargs.get("feature_size")
+        segment = log_mel_spectrogram(
+            audio[start:end],
+            n_mels=model_n_mels if model_n_mels is not None else 80,
+            padding=0 if (end is None or audio.shape[0] >= end) else end - audio.shape[0]
+        )
+        encoder_output = self.model.encode(segment)
+        results = self.model.model.detect_language(encoder_output)[0]
+        all_language_probs = [[token[2:-2], prob] for (token, prob) in results]
+        return self.language_encoding(all_language_probs)
 
     def detect_language(self, audio: np.ndarray, language_detection_segments: int, threshold_value: int, determine_detected_language) -> str:
         segments = []
         for i in range(0, language_detection_segments):
+            # If the audio is shorter than or equal to the threshold (in samples) and this is the first segment,
+            # handle this as a special case (e.g., for very short audio files).
             if audio.shape[0] <= (SAMPLE_RATE * threshold_value) and i==0:
                 return "Unknown"
+            # If the current segment would extend past the end of the audio,
+            # retrieve the model's feature size (likely to handle padding or special processing for the last segment).
             if audio.shape[0] - (i+1)*N_SAMPLES < 0:
-                model_n_mels = self.model.feat_kwargs.get("feature_size")
-                segment = log_mel_spectrogram(audio[i*N_SAMPLES:],
-                                            n_mels=model_n_mels if model_n_mels is not None else 80,
-                                            padding=0 if audio.shape[0] >= (i+1)*N_SAMPLES else (i+1)*N_SAMPLES - audio.shape[0])
-                encoder_output = self.model.encode(segment)
-                results = self.model.model.detect_language(encoder_output)[0]
-                all_language_probs = [[token[2:-2], prob] for (token, prob) in results]
-                segments.append(self.language_encoding(all_language_probs))
+                segments.append(self._process_language_segment(audio, i*N_SAMPLES, None))
                 lang = determine_detected_language(segments, i, audio.shape[0])
                 print(f"Detected language: {lang} across {language_detection_segments} segments...")
                 return lang
-            
             if audio.shape[0] < N_SAMPLES:
                 print("Warning: audio is shorter than 30s, language detection may be inaccurate.")
-            
-            model_n_mels = self.model.feat_kwargs.get("feature_size")
-            segment = log_mel_spectrogram(audio[i*N_SAMPLES: (i+1)*N_SAMPLES],
-                                        n_mels=model_n_mels if model_n_mels is not None else 80,
-                                        padding=0 if audio.shape[0] >= (i+1)*N_SAMPLES else (i+1)*N_SAMPLES - audio.shape[0])
-            encoder_output = self.model.encode(segment)
-            results = self.model.model.detect_language(encoder_output)[0]
-            all_language_probs = [[token[2:-2], prob] for (token, prob) in results]
-            segments.append(self.language_encoding(all_language_probs))
-            
-        
+            segments.append(self._process_language_segment(audio, i*N_SAMPLES, (i+1)*N_SAMPLES))
         lang = determine_detected_language(segments, i, audio.shape[0])
         print(f"Detected language: {lang} across {language_detection_segments} segments...")
         return lang
