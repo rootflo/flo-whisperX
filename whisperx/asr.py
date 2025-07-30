@@ -227,7 +227,19 @@ class FasterWhisperPipeline(Pipeline):
         )
         if self.tokenizer is None:
             language = language or self.detect_language(audio, language_detection_segments, threshold_value, determine_detected_language)
-            language_detect = self.detect_language(audio, language_detection_segments, threshold_value, determine_detected_language) if language == "Unknown" else language
+            if language == "Unknown":
+                end = SAMPLE_RATE * 30
+                model_n_mels = self.model.feat_kwargs.get("feature_size")
+                segment = log_mel_spectrogram(
+                    audio[0:end],
+                    n_mels=model_n_mels if model_n_mels is not None else 80,
+                    padding=0 if (end is None or audio.shape[0] >= end) else end - audio.shape[0]
+                )
+                encoder_output = self.model.encode(segment)
+                results = self.model.model.detect_language(encoder_output)[0]
+                language_detect = results[0][0][2:-2]
+            else:
+                language_detect = language
             task = task or "transcribe"
             self.tokenizer = Tokenizer(
                 self.model.hf_tokenizer,
