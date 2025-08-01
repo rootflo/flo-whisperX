@@ -255,7 +255,7 @@ class FasterWhisperPipeline(Pipeline):
                     self.model.hf_tokenizer,
                     self.model.model.is_multilingual,
                     task=task,
-                    language=language_detect,
+                    language=language,
                 )
 
         if self.suppress_numerals:
